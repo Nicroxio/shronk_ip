@@ -7,6 +7,4 @@ edition = "2021"
 
 [dependencies]
 maxminddb = "0.24.0"
-serde = "1.0.198"
-tide = "0.16.0"
-async-std = { version = "1.6.0", features = ["attributes"] }
+rouille = "3.6.2"

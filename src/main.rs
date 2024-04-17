@@ -1,6 +1,9 @@
 use maxminddb;
-use std::net::IpAddr;
-use std::str::FromStr;
+use rouille::Response;
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    str::FromStr,
+};
 
 #[derive(Debug)]
 struct CityData {
@@ -11,10 +14,14 @@ struct CityData {
 }
 
 fn main() {
-    let ip: IpAddr = FromStr::from_str("82.40.21.7").unwrap();
-
-    let data = lookup_ip(ip);
-    println!("{:?}", data);
+    rouille::start_server("127.0.0.1:8080", move |request| {
+        let forwarded_for = request.header("X-Forwarded-For");
+        let ip: IpAddr = std::net::IpAddr::V4(Ipv4Addr::from_str(forwarded_for.unwrap()).unwrap());
+        let data = lookup_ip(ip);
+        println!("{}", ip);
+        println!("{:?}", forwarded_for);
+        Response::text(format!("{:?}", data))
+    });
 }
 
 fn parse_data(lookup: maxminddb::geoip2::City) -> CityData {
