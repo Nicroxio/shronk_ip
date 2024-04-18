@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 maxminddb = "0.24.0"
 rouille = "3.6.2"
+serde = "1.0.198"

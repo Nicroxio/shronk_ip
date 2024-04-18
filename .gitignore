@@ -27,3 +27,4 @@ Cargo.toml.orig
 # OS-specific files
 .DS_Store
 Thumbs.db
+Docker
