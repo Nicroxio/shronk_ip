@@ -1,6 +1,7 @@
 use maxminddb;
 use rouille::Response;
 use serde;
+use std::borrow::Cow;
 use std::{
     net::{IpAddr, Ipv4Addr},
     str::FromStr,
@@ -21,6 +22,7 @@ fn main() {
         let forwarded_for = request.header("X-Forwarded-For");
 
         let ip: IpAddr = std::net::IpAddr::V4(Ipv4Addr::from_str(forwarded_for.unwrap()).unwrap());
+        // let ip = std::net::IpAddr::V4(Ipv4Addr::from_str("1.1.1.1").unwrap());
 
         let data = match lookup_ip(ip) {
             Ok(data) => data,
@@ -30,7 +32,10 @@ fn main() {
             }
         };
         println!("{}", ip);
-        Response::json(&data)
+        let mut rep = Response::json(&data);
+        rep.headers
+            .push((Cow::from("Access-Control-Allow-Origin"), Cow::from("*")));
+        return rep;
     });
 }
 
