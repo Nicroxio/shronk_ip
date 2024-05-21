@@ -1,49 +1,102 @@
-use maxminddb;
-use rouille::Response;
-use serde;
-use std::borrow::Cow;
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    str::FromStr,
-};
+use rand::prelude::*;
 
-#[derive(Debug, serde::Serialize, Default)]
+#[macro_use]
+extern crate rocket;
+use maxminddb;
+use rocket::http::Status;
+use rocket::request::{FromRequest, Outcome, Request};
+use rocket::serde::json::Json;
+use rocket_cors::{AllowedOrigins, CorsOptions};
+use serde;
+use std::net::{IpAddr, Ipv4Addr};
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(crate = "rocket::serde")]
 struct CityData {
     ip: String,
-    city_name: String,
-    country_name: String,
+    city: String,
+    country: String,
     is_in_european_union: bool,
     iso_code: String,
 }
 
-fn main() {
-    println!("Starting");
-    rouille::start_server("0.0.0.0:8080", move |request| {
-        let forwarded_for = request.header("X-Forwarded-For");
+struct RealIp<'r>(&'r str);
 
-        let ip: IpAddr = std::net::IpAddr::V4(Ipv4Addr::from_str(forwarded_for.unwrap()).unwrap());
-        // let ip = std::net::IpAddr::V4(Ipv4Addr::from_str("1.1.1.1").unwrap());
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for RealIp<'r> {
+    type Error = ();
 
-        let data = match lookup_ip(ip) {
-            Ok(data) => data,
-            Err(e) => {
-                eprintln!("Error:{}", e);
-                CityData::default()
-            }
-        };
-        println!("{}", ip);
-        let mut rep = Response::json(&data);
-        rep.headers
-            .push((Cow::from("Access-Control-Allow-Origin"), Cow::from("*")));
-        return rep;
-    });
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        match request.headers().get_one("X-Forwarded-For") {
+            Some(ip) => Outcome::Success(RealIp(ip)),
+            None => Outcome::Error((Status::BadRequest, ())),
+        }
+    }
 }
 
-fn parse_data(lookup: maxminddb::geoip2::City, ip: IpAddr) -> CityData {
+#[get("/")]
+async fn index(real: RealIp<'_>) -> Json<CityData> {
+    let ip: IpAddr = real.0.parse().expect("Failed to Parse IP");
+    let city = lookup_ip(ip).await.expect("Ip Addr Does not exist");
+    Json(city)
+}
+
+#[get("/raw")]
+async fn raw(real: RealIp<'_>) -> String {
+    real.0.to_string()
+}
+
+#[get("/imfeelinglucky")]
+async fn imfeelinglucky(real: RealIp<'_>) -> Result<Json<CityData>, Status> {
+    let mut rng: StdRng = SeedableRng::from_entropy();
+    let decide = rng.gen_range(0..1000);
+
+    let mut ip: IpAddr = real.0.parse().expect("Failed to Parse IP");
+    match ip {
+        IpAddr::V4(ipv4) => {
+            if decide >= 700 {
+                let new_second_octet = rng.gen_range(ipv4.octets()[1]..255);
+                ip = IpAddr::V4(Ipv4Addr::new(
+                    ipv4.octets()[0],
+                    new_second_octet,
+                    ipv4.octets()[2],
+                    ipv4.octets()[3],
+                ));
+            } else if decide < 700 && decide > 500 {
+                let new_fourth_octet = rng.gen_range(0..ipv4.octets()[3]);
+                ip = IpAddr::V4(Ipv4Addr::new(
+                    ipv4.octets()[0],
+                    ipv4.octets()[1],
+                    ipv4.octets()[2],
+                    new_fourth_octet,
+                ));
+            } else {
+                println!("Nothing")
+            }
+        }
+        IpAddr::V6(_ipv6) => return Err(Status::BadRequest),
+    };
+
+    let city = lookup_ip(ip).await.expect("Ip Addr Does not exist");
+    Ok(Json(city))
+}
+
+#[launch]
+fn rocket() -> _ {
+    let cors = CorsOptions::default()
+        .allowed_origins(AllowedOrigins::all())
+        .allow_credentials(true);
+
+    rocket::build()
+        .mount("/", routes![index, raw, imfeelinglucky])
+        .attach(cors.to_cors().unwrap())
+}
+
+async fn parse_data(lookup: maxminddb::geoip2::City<'_>, ip: IpAddr) -> CityData {
     let mut data = CityData {
         ip: ip.to_string(),
-        city_name: String::new(),
-        country_name: String::new(),
+        city: String::new(),
+        country: String::new(),
         is_in_european_union: false,
         iso_code: String::new(),
     };
@@ -51,7 +104,7 @@ fn parse_data(lookup: maxminddb::geoip2::City, ip: IpAddr) -> CityData {
     if let Some(city) = lookup.city {
         if let Some(names) = city.names {
             if let Some(name) = names.get("en") {
-                data.city_name = name.to_string();
+                data.city = name.to_string();
             }
         }
     }
@@ -64,15 +117,15 @@ fn parse_data(lookup: maxminddb::geoip2::City, ip: IpAddr) -> CityData {
         }
         if let Some(names) = country.names {
             if let Some(name) = names.get("en") {
-                data.country_name = name.to_string();
+                data.country = name.to_string();
             }
         }
     }
     return data;
 }
 
-fn lookup_ip(ip: IpAddr) -> Result<CityData, maxminddb::MaxMindDBError> {
+async fn lookup_ip(ip: IpAddr) -> Result<CityData, maxminddb::MaxMindDBError> {
     let reader = maxminddb::Reader::open_readfile("/app/dbip-city-lite-2023-10.mmdb")?;
     let city: maxminddb::geoip2::City = reader.lookup(ip)?;
-    Ok(parse_data(city, ip))
+    Ok(parse_data(city, ip).await)
 }
