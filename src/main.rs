@@ -3,10 +3,14 @@ use rand::prelude::*;
 #[macro_use]
 extern crate rocket;
 use maxminddb;
-use rocket::http::Status;
-use rocket::request::{FromRequest, Outcome, Request};
-use rocket::serde::json::Json;
-use rocket_cors::{AllowedOrigins, CorsOptions};
+use rocket::{
+    fairing::{Fairing, Info, Kind},
+    http::{Header, Status},
+    request::{FromRequest, Outcome, Request},
+    serde::json::Json,
+    Response,
+};
+// use rocket_cors::{AllowedOrigins, CorsOptions};
 use serde;
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -83,13 +87,13 @@ async fn imfeelinglucky(real: RealIp<'_>) -> Result<Json<CityData>, Status> {
 
 #[launch]
 fn rocket() -> _ {
-    let cors = CorsOptions::default()
-        .allowed_origins(AllowedOrigins::all())
-        .allow_credentials(true);
+    // let cors = CorsOptions::default()
+    //     .allowed_origins(AllowedOrigins::all())
+    //     .allow_credentials(true);
 
     rocket::build()
         .mount("/", routes![index, raw, imfeelinglucky])
-        .attach(cors.to_cors().unwrap())
+        .attach(Cors)
 }
 
 async fn parse_data(lookup: maxminddb::geoip2::City<'_>, ip: IpAddr) -> CityData {
@@ -128,4 +132,26 @@ async fn lookup_ip(ip: IpAddr) -> Result<CityData, maxminddb::MaxMindDBError> {
     let reader = maxminddb::Reader::open_readfile("/app/dbip-city-lite-2023-10.mmdb")?;
     let city: maxminddb::geoip2::City = reader.lookup(ip)?;
     Ok(parse_data(city, ip).await)
+}
+
+pub struct Cors;
+
+#[rocket::async_trait]
+impl Fairing for Cors {
+    fn info(&self) -> Info {
+        Info {
+            name: "Cross-Origin-Resource-Sharing Fairing",
+            kind: Kind::Response,
+        }
+    }
+
+    async fn on_response<'r>(&self, _request: &'r Request<'_>, response: &mut Response<'r>) {
+        response.set_header(Header::new("Access-Control-Allow-Origin", "*"));
+        response.set_header(Header::new(
+            "Access-Control-Allow-Methods",
+            "POST, PATCH, PUT, DELETE, HEAD, OPTIONS, GET",
+        ));
+        response.set_header(Header::new("Access-Control-Allow-Headers", "*"));
+        response.set_header(Header::new("Access-Control-Allow-Credentials", "true"));
+    }
 }
