@@ -3,6 +3,8 @@ use rand::prelude::*;
 #[macro_use]
 extern crate rocket;
 use maxminddb;
+use rocket::response::content::RawHtml;
+use rocket::{catch, catchers};
 use rocket::{
     fairing::{Fairing, Info, Kind},
     http::{Header, Status},
@@ -10,7 +12,7 @@ use rocket::{
     serde::json::Json,
     Response,
 };
-// use rocket_cors::{AllowedOrigins, CorsOptions};
+
 use serde;
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -26,16 +28,44 @@ struct CityData {
 
 struct RealIp<'r>(&'r str);
 
+#[derive(Debug)]
+enum RealIpError {
+    MissingHeader,
+}
+
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for RealIp<'r> {
-    type Error = ();
+    type Error = RealIpError;
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         match request.headers().get_one("X-Forwarded-For") {
             Some(ip) => Outcome::Success(RealIp(ip)),
-            None => Outcome::Error((Status::BadRequest, ())),
+            None => Outcome::Error((Status::BadRequest, RealIpError::MissingHeader)),
         }
     }
+}
+
+#[catch(400)]
+fn bad_request(req: &Request) -> RawHtml<String> {
+    let error_message = if let Some(error) = req.local_cache(|| None::<RealIpError>) {
+        match error {
+            RealIpError::MissingHeader => "Missing X-Forwarded-For header".to_string(),
+        }
+    } else {
+        "Bad request".to_string()
+    };
+
+    RawHtml(format!(
+        "<html>
+            <head><title>400 Bad Request</title></head>
+            <body>
+                <h1>400 Bad Request</h1>
+                <p>This ip address does not exist within the database</p>
+                <p>{}</p>
+            </body>
+        </html>",
+        error_message
+    ))
 }
 
 #[get("/")]
@@ -87,12 +117,9 @@ async fn imfeelinglucky(real: RealIp<'_>) -> Result<Json<CityData>, Status> {
 
 #[launch]
 fn rocket() -> _ {
-    // let cors = CorsOptions::default()
-    //     .allowed_origins(AllowedOrigins::all())
-    //     .allow_credentials(true);
-
     rocket::build()
         .mount("/", routes![index, raw, imfeelinglucky])
+        .register("/", catchers![bad_request])
         .attach(Cors)
 }
 
