@@ -3,12 +3,12 @@ use rand::prelude::*;
 #[macro_use]
 extern crate rocket;
 use maxminddb;
-use rocket::response::content::RawHtml;
 use rocket::{catch, catchers};
 use rocket::{
     fairing::{Fairing, Info, Kind},
     http::{Header, Status},
     request::{FromRequest, Outcome, Request},
+    response::content::RawHtml,
     serde::json::Json,
     Response,
 };
